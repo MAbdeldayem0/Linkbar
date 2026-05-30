@@ -20,6 +20,7 @@ uses
   ActiveX,
   Linkbar.Consts,
   Linkbar.OS,
+  Linkbar.Common,
   mUnit in 'mUnit.pas',
 {$IFDEF DEBUG}
   Linkbar.ExceptionDialog,
@@ -52,6 +53,10 @@ begin
 {$IFDEF DEBUG}
   ReportMemoryLeaksOnShutdown := True;
 {$ENDIF}
+
+  // Silently swallow transient GDI+ 'Out of Memory' from paint cycles that
+  // race a slow display wake-up; everything else still surfaces normally.
+  Application.OnException := Linkbar.Common.SilentDisplayTransitionException;
 
   { Check supported OS }
   if not IsMinimumSupportedOS

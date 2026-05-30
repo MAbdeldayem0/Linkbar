@@ -199,12 +199,17 @@ end;
 procedure THiddenForm.SetMonitor(const AMonitorNum: Integer);
 var
   rabd: TAppBarData;
+  EffectiveMonitorNum: Integer;
 begin
+  if InRange(AMonitorNum, 0, Screen.MonitorCount - 1)
+  then EffectiveMonitorNum := AMonitorNum
+  else EffectiveMonitorNum := Screen.PrimaryMonitor.MonitorNum;
+
   FillChar(rabd, SizeOf(rabd), 0);
   rabd.cbSize:= SizeOf(rabd);
   rabd.hWnd:= Handle;
   rabd.uEdge := ABE_TOP;
-  rabd.rc := Screen.Monitors[AMonitorNum].BoundsRect;
+  rabd.rc := Screen.Monitors[EffectiveMonitorNum].BoundsRect;
 
   rabd.rc.Width := 0;
   rabd.rc.Height := 0;
@@ -525,6 +530,9 @@ begin
   if AEnabled
   then rabd.lParam:= -1
   else rabd.lParam:= 0;
+
+  if not InRange(MonitorNum, 0, Screen.MonitorCount - 1)
+  then MonitorNum := Screen.PrimaryMonitor.MonitorNum;
 
   if IsWindows8OrAbove
   then begin

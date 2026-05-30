@@ -68,6 +68,7 @@ type
     oAppBar : TAccessBar;
     ToolTip: TTooltip32;
     FCreated: Boolean;
+    FDisplayRetryCount: Integer;
     FHotIndex: Integer;
     FPressedIndex: Integer;
     FMousePosDown: TPoint;
@@ -185,6 +186,7 @@ type
     procedure QueryHideEvent(Sender: TObject; AEnabled: boolean);
     function IsItemIndex(const AIndex: Integer): Boolean;
     procedure CreateBitmaps;
+    function TryHandleDisplayChange: Boolean;
   protected
     // Drag&Drop functions
     FItemDropPosition: Integer;
@@ -283,6 +285,9 @@ const
   LM_SHELLNOTIFY = WM_USER + 88;
   TIMER_AUTO_SHOW = 15;
   TIMER_AUTO_HIDE = 16;
+  TIMER_DISPLAY_RETRY = 17;
+  TIMER_DISPLAY_RETRY_DELAY = 500;
+  TIMER_DISPLAY_RETRY_MAX = 30;
 
 function EnumWindowProcStopDirWatch(wnd: HWND; lParam: LPARAM): BOOL; stdcall;
 var
@@ -640,6 +645,9 @@ end;
 
 procedure TLinkbarWcl.RecreateMainBitmap(const AWidth, AHeight: integer);
 begin
+  // A degenerate bitmap (any dim <= 0) means no usable HDC, and any subsequent
+  // GDI+ call on that HDC raises "Out of Memory". Skip the paint cycle instead.
+  if (AWidth <= 0) or (AHeight <= 0) then Exit;
   BitmapPanel.SetSize(AWidth, AHeight);
   BitmapPanel.Clear;
   // Draw background
@@ -650,6 +658,7 @@ end;
 
 procedure TLinkbarWcl.RecreateButtonBitmap(const AWidth, AHeight: integer);
 begin
+  if (AWidth <= 0) or (AHeight <= 0) then Exit;
   // Create clear bitmap
   BitmapButton.SetSize(AWidth, AHeight);
   BitmapButton.Clear;
@@ -677,6 +686,9 @@ var w, h, c1gw, c2gw, wh: Integer;
 begin
   w := ABounds.Width;
   h := ABounds.Height;
+  // Same rationale as RecreateMainBitmap: 0-dim bounds produce a 0 HDC, which
+  // makes every TGPGraphics.FromHDC below raise "Out of Memory" repeatedly.
+  if (w <= 0) or (h <= 0) then Exit;
 
   // Draw
   if (FAutoHiden)
@@ -2064,6 +2076,36 @@ begin
   UpdateBlur;
 end;
 
+function TLinkbarWcl.TryHandleDisplayChange: Boolean;
+var
+  Mon: TMonitor;
+  NewMonitorNum: Integer;
+  TargetBounds: TRect;
+begin
+  // OLED / DP monitors may take seconds to come back after sleep/source switch.
+  // During the gap Self.Monitor can be nil, Screen.Monitors[] can be short, and
+  // the target monitor's BoundsRect can report empty even when present. Each of
+  // those leaks downstream as either an AV or GDI+ "Out of Memory" on the next
+  // paint, so reject all three and let the retry timer try again.
+  Result := False;
+  if Screen.MonitorCount <= 0 then Exit;
+
+  Mon := Self.Monitor;
+  if Mon = nil then Exit;
+
+  NewMonitorNum := Mon.MonitorNum;
+  if not InRange(NewMonitorNum, 0, Screen.MonitorCount - 1)
+  then NewMonitorNum := Screen.PrimaryMonitor.MonitorNum;
+
+  TargetBounds := Screen.Monitors[NewMonitorNum].BoundsRect;
+  if (TargetBounds.Width <= 0) or (TargetBounds.Height <= 0) then Exit;
+
+  FMonitorNum := NewMonitorNum;
+  oAppBar.MonitorNum := FMonitorNum;
+  oAppBar.AppBarPosChanged;
+  Result := True;
+end;
+
 procedure TLinkbarWcl.WndProc(var Msg: TMessage);
 begin
   case Msg.Msg of
@@ -2189,10 +2231,10 @@ begin
         inherited;
         Msg.Result := 0;
         if not FCreated then Exit;
-        // force update Screen
-        FMonitorNum := Self.Monitor.MonitorNum; // or Screen.MonitorFromWindow(0, mdNull);
-        oAppBar.MonitorNum := FMonitorNum;
-        oAppBar.AppBarPosChanged;
+        KillTimer(Handle, TIMER_DISPLAY_RETRY);
+        FDisplayRetryCount := 0;
+        if not TryHandleDisplayChange
+        then SetTimer(Handle, TIMER_DISPLAY_RETRY, TIMER_DISPLAY_RETRY_DELAY, nil);
         Exit;
       end;
     { Delayed auto show (timer) }
@@ -2209,6 +2251,14 @@ begin
             begin
               KillTimer(Handle, TIMER_AUTO_HIDE);
               DoAutoHide;
+              Exit;
+            end;
+          TIMER_DISPLAY_RETRY:
+            begin
+              Inc(FDisplayRetryCount);
+              if TryHandleDisplayChange
+                 or (FDisplayRetryCount >= TIMER_DISPLAY_RETRY_MAX)
+              then KillTimer(Handle, TIMER_DISPLAY_RETRY);
               Exit;
             end;
         end;

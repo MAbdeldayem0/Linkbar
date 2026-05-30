@@ -10,11 +10,12 @@ unit Linkbar.Common;
 interface
 
 uses
-  Windows, SysUtils;
+  Windows, SysUtils, Classes;
 
   procedure ReduceSysMenu(AWnd: HWND);
   procedure PreventSizing(var AResult: LPARAM);
   function RemovePrefix(A: string): string;
+  procedure SilentDisplayTransitionException(Sender: TObject; E: Exception);
 
 implementation
 
@@ -53,6 +54,22 @@ begin
   if (AResult = HTTOP) or (AResult = HTTOPLEFT) or (AResult = HTTOPRIGHT)
   then AResult := HTCAPTION
   else AResult := HTCLIENT;
+end;
+
+procedure SilentDisplayTransitionException(Sender: TObject; E: Exception);
+begin
+  // GDI+ raises EGdipError('Out of Memory') when it's handed a NULL HDC or a
+  // bitmap with 0-dim. This happens transiently while a slow display (OLED,
+  // DP-MST) is waking up and the bar's backing bitmap is mid-recreate. Without
+  // this handler each paint cycle during the gap pops its own modal dialog,
+  // stacking several before the bar settles. Swallow only that exact message
+  // so genuine bugs still surface through the default handler.
+  if (E <> nil) and (E.Message = 'Out of Memory')
+  then Exit;
+
+  // Default: let Application show it.
+  if (E <> nil)
+  then SysUtils.ShowException(E, ExceptAddr);
 end;
 
 end.
