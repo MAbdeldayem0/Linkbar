@@ -56,7 +56,7 @@ begin
 
   // Silently swallow transient GDI+ 'Out of Memory' from paint cycles that
   // race a slow display wake-up; everything else still surfaces normally.
-  Application.OnException := Linkbar.Common.SilentDisplayTransitionException;
+  Application.OnException := LinkbarAppEvents.SilentDisplayTransition;
 
   { Check supported OS }
   if not IsMinimumSupportedOS

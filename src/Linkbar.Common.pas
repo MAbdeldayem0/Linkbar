@@ -12,10 +12,19 @@ interface
 uses
   Windows, SysUtils, Classes;
 
+type
+  // Holder for Application.OnException, which requires a method of an object
+  // (TExceptionEvent = procedure(...) of object) rather than a free procedure.
+  TLinkbarAppEvents = class
+    procedure SilentDisplayTransition(Sender: TObject; E: Exception);
+  end;
+
+var
+  LinkbarAppEvents: TLinkbarAppEvents;
+
   procedure ReduceSysMenu(AWnd: HWND);
   procedure PreventSizing(var AResult: LPARAM);
   function RemovePrefix(A: string): string;
-  procedure SilentDisplayTransitionException(Sender: TObject; E: Exception);
 
 implementation
 
@@ -56,7 +65,7 @@ begin
   else AResult := HTCLIENT;
 end;
 
-procedure SilentDisplayTransitionException(Sender: TObject; E: Exception);
+procedure TLinkbarAppEvents.SilentDisplayTransition(Sender: TObject; E: Exception);
 begin
   // GDI+ raises EGdipError('Out of Memory') when it's handed a NULL HDC or a
   // bitmap with 0-dim. This happens transiently while a slow display (OLED,
@@ -71,5 +80,11 @@ begin
   if (E <> nil)
   then SysUtils.ShowException(E, ExceptAddr);
 end;
+
+initialization
+  LinkbarAppEvents := TLinkbarAppEvents.Create;
+
+finalization
+  FreeAndNil(LinkbarAppEvents);
 
 end.
